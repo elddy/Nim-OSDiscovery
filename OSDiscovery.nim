@@ -63,7 +63,7 @@ proc `$`*(info: TARGET_INFO) =
 #[
     Discover OS version using SMBv1
 ]#
-proc SMBv1Discovery(target: string, info: var TARGET_INFO) = 
+proc SMBv1Discovery(target: string, info: var TARGET_INFO, timeout: int) = 
     let socket = newSocket()
     var recvClient: seq[string]
 
@@ -72,14 +72,14 @@ proc SMBv1Discovery(target: string, info: var TARGET_INFO) =
 
     ## SMBv1 Init negotiate
     socket.send(getSMBv1NegoPacket("SMB1"))
-    recvClient = socket.recvPacket(1024, 100)
+    recvClient = socket.recvPacket(1024, timeout)
 
     ## Check Signing
     signing = checkSigning recvClient
 
     ## SMBv1NTLM negotiate
     socket.send(getSMBv1NTLMNego(signing))
-    recvClient = socket.recvPacket(1024, 100)
+    recvClient = socket.recvPacket(1024, timeout)
     
     ## Parse Windows version from the response
     let win_ver = parseWindowsVersion(recvClient)
@@ -91,7 +91,7 @@ proc SMBv1Discovery(target: string, info: var TARGET_INFO) =
 #[
     Discover host information using SMBv2
 ]#
-proc SMBv2Discovery(target: string, info: var TARGET_INFO) = 
+proc SMBv2Discovery(target: string, info: var TARGET_INFO, timeout: int) = 
     let socket = newSocket()
     var recvClient: seq[string]
 
@@ -100,18 +100,18 @@ proc SMBv2Discovery(target: string, info: var TARGET_INFO) =
 
     ## SMBv1 Init negotiate
     socket.send(getSMBv1NegoPacket("SMB2.1"))
-    recvClient = socket.recvPacket(1024, 100)
+    recvClient = socket.recvPacket(1024, timeout)
 
     ## Check Signing
     signing = checkSigning recvClient
 
     ## SMBv2 negotiate
     socket.send(getSMBv2NegoPacket())
-    recvClient = socket.recvPacket(1024, 100)
+    recvClient = socket.recvPacket(1024, timeout)
 
     ## SMBv2NTLM negotiate
     socket.send(getSMBv2NTLMNego(signing))
-    recvClient = socket.recvPacket(1024, 100)
+    recvClient = socket.recvPacket(1024, timeout)
     
     socket.close()
 
@@ -142,17 +142,17 @@ proc SMBv2Discovery(target: string, info: var TARGET_INFO) =
         dns_domain          -> DNS domain name
         dns_computer        -> DNS computer name
 ]#
-proc runOSDiscovery*(target: string): TARGET_INFO =
+proc runOSDiscovery*(target: string, timeout=500): TARGET_INFO =
     var info: TARGET_INFO
 
     ## SMBv2
-    SMBv2Discovery(target, info)
+    SMBv2Discovery(target, info, timeout)
     
     ## SMBv1
-    SMBv1Discovery(target, info)
+    SMBv1Discovery(target, info, timeout)
 
     return info
 
 when isMainModule:
-    let targetInfo = runOSDiscovery("10.0.0.41")
+    let targetInfo = runOSDiscovery("10.0.0.22")
     $targetInfo

@@ -78,7 +78,7 @@ proc getStatusPending*(Status: seq[string]): bool =
     if Status == @["03", "01", "00", "00"]:
         result = true
 
-proc recvPacket*(socket: Socket, bufSize, timeout: int): seq[string] =
+proc recvPacket*(socket: Socket, bufSize, timeout = 500): seq[string] =
     var buf: string
     try:
         while socket.recv(buf, 1, timeout) > 0:
@@ -86,7 +86,7 @@ proc recvPacket*(socket: Socket, bufSize, timeout: int): seq[string] =
     except:
         discard
 
-proc recvPacketForNTLM*(socket: Socket, bufSize, timeout: int): string =
+proc recvPacketForNTLM*(socket: Socket, bufSize, timeout = 500): string =
     var buf: string
     try:
         while socket.recv(buf, 1, timeout) > 0:
