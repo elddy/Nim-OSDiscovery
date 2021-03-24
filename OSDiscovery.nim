@@ -50,10 +50,18 @@ proc parseTargetInfo(target_info: seq[string], ntlmssp_struct: NTLMSSP_STRUCT): 
         build_number = ntlmssp_struct.build_number.byteArrayToNumber()
     result.os_version = "$1.$2 (Build $3)" % [$major_version, $minor_version, $build_number]
 
+    ## Remove padding
+    result.netBios_domain = result.netBios_domain.split("\0").join()
+    result.netBios_computer = result.netBios_computer.split("\0").join()
+    result.dns_domain = result.dns_domain.split("\0").join()
+    result.dns_computer = result.dns_computer.split("\0").join()
+
 #[
     Print nice and all
 ]#
 proc `$`*(info: TARGET_INFO) =
+    if info.os_version == "":
+        return
     stdout.write("OS Version --> "); stdout.styledWrite(fgCyan, info.os_version); stdout.write("\n")
     stdout.write("NetBIOS Domain Name --> "); stdout.styledWrite(fgCyan, info.netBios_domain); stdout.write("\n")
     stdout.write("NetBIOS Computer Name --> "); stdout.styledWrite(fgCyan, info.netBios_computer); stdout.write("\n")
@@ -67,6 +75,11 @@ proc SMBv1Discovery(target: string, info: var TARGET_INFO, timeout: int) =
     let socket = newSocket()
     var recvClient: seq[string]
 
+    ## Reset
+    session_ID = @[0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte]
+    tree_ID = @[0x00.byte,0x00.byte,0x00.byte,0x00.byte]
+    messageID = 1
+
     ## Connect
     socket.connect(target, 445.Port)
 
@@ -75,7 +88,11 @@ proc SMBv1Discovery(target: string, info: var TARGET_INFO, timeout: int) =
     recvClient = socket.recvPacket(1024, timeout)
 
     ## Check Signing
-    signing = checkSigning recvClient
+    try:
+        signing = checkSigning recvClient
+    except:
+        socket.close()
+        return
 
     ## SMBv1NTLM negotiate
     socket.send(getSMBv1NTLMNego(signing))
@@ -94,6 +111,11 @@ proc SMBv1Discovery(target: string, info: var TARGET_INFO, timeout: int) =
 proc SMBv2Discovery(target: string, info: var TARGET_INFO, timeout: int) = 
     let socket = newSocket()
     var recvClient: seq[string]
+    
+    ## Reset
+    session_ID = @[0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte]
+    tree_ID = @[0x00.byte,0x00.byte,0x00.byte,0x00.byte]
+    messageID = 1
 
     ## Connect
     socket.connect(target, 445.Port)
@@ -115,23 +137,26 @@ proc SMBv2Discovery(target: string, info: var TARGET_INFO, timeout: int) =
     
     socket.close()
 
-    let endRecv = recvClient.len-1
-    var 
-        blob_length_hex = recvClient[74..75]
-        blob_length = blob_length_hex.seqHexToNumber
-        security_blob = recvClient[recvClient.len-blob_length..endRecv]
+    try:
+        let endRecv = recvClient.len-1
+        var 
+            blob_length_hex = recvClient[74..75]
+            blob_length = blob_length_hex.seqHexToNumber
+            security_blob = recvClient[recvClient.len-blob_length..endRecv]
 
-        NTLMSSP = security_blob[31..security_blob.len-1]
-        NTLMSSP_byte = NTLMSSP[..55]
+            NTLMSSP = security_blob[31..security_blob.len-1]
+            NTLMSSP_byte = NTLMSSP[..55]
 
-        ntlmssp_struct = parseNTLMSSP(NTLMSSP_byte)
-        
-        endNTLMSSP = NTLMSSP.len - 1
-        
-        target_info_len = ntlmssp_struct.target_info_length[0].int
-        target_info_byte = NTLMSSP[NTLMSSP.len-target_info_len..endNTLMSSP]
+            ntlmssp_struct = parseNTLMSSP(NTLMSSP_byte)
+            
+            endNTLMSSP = NTLMSSP.len - 1
+            
+            target_info_len = ntlmssp_struct.target_info_length[0].int
+            target_info_byte = NTLMSSP[NTLMSSP.len-target_info_len..endNTLMSSP]
 
-    info = parseTargetInfo(target_info_byte, ntlmssp_struct)
+        info = parseTargetInfo(target_info_byte, ntlmssp_struct)
+    except:
+        discard
 
 #[
     Run OS discovery (SMBv2, SMBv1)
@@ -154,5 +179,7 @@ proc runOSDiscovery*(target: string, timeout=500): TARGET_INFO =
     return info
 
 when isMainModule:
-    let targetInfo = runOSDiscovery("10.0.0.22")
-    $targetInfo
+    var ips = @["10.0.0.8", "10.0.0.22"]
+    for i in ips:
+        let targetInfo = runOSDiscovery(i)
+        $targetInfo

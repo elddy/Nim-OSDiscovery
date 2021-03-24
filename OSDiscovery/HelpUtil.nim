@@ -119,7 +119,7 @@ var
     process_ID*: seq[byte] = pidToByteArray(getCurrentProcessId())
     tree_ID*: seq[byte] = @[0x00.byte,0x00.byte,0x00.byte,0x00.byte]
     signing*: bool
-    HMAC_SHA256_key*: seq[byte]
+    messageID* = 1
 
 #[
     Parse Windows version from response

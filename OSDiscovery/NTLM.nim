@@ -23,8 +23,6 @@ type
         build_number*        : array[5, byte]
         ntlm_current_rev*    : array[1, byte]
 
-var messageID* = 1
-
 proc parseNTLMSSP*(NTLMSSP_byte: seq[string]): NTLMSSP_STRUCT =
     var 
         count = 0
