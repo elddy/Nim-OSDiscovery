@@ -2,7 +2,7 @@
     SMB OS Discovery
 ]#
 import net, strutils, terminal
-import modules/[SMBv1, SMBv2, HelpUtil, NTLM]
+import OSDiscovery/[SMBv1, SMBv2, HelpUtil, NTLM]
 
 #[
     Object for the target information
@@ -55,10 +55,10 @@ proc parseTargetInfo(target_info: seq[string], ntlmssp_struct: NTLMSSP_STRUCT): 
 ]#
 proc `$`*(info: TARGET_INFO) =
     stdout.write("OS Version --> "); stdout.styledWrite(fgCyan, info.os_version); stdout.write("\n")
-    stdout.write("NetBIOS domain name --> "); stdout.styledWrite(fgCyan, info.netBios_domain); stdout.write("\n")
-    stdout.write("NetBIOS computer name --> "); stdout.styledWrite(fgCyan, info.netBios_computer); stdout.write("\n")
-    stdout.write("DNS domain name --> "); stdout.styledWrite(fgCyan, info.dns_domain); stdout.write("\n")
-    stdout.write("DNS computer name --> "); stdout.styledWrite(fgCyan, info.dns_computer); stdout.write("\n")
+    stdout.write("NetBIOS Domain Name --> "); stdout.styledWrite(fgCyan, info.netBios_domain); stdout.write("\n")
+    stdout.write("NetBIOS Computer Name --> "); stdout.styledWrite(fgCyan, info.netBios_computer); stdout.write("\n")
+    stdout.write("DNS Domain Name --> "); stdout.styledWrite(fgCyan, info.dns_domain); stdout.write("\n")
+    stdout.write("DNS Computer Name --> "); stdout.styledWrite(fgCyan, info.dns_computer); stdout.write("\n")
 
 #[
     Discover OS version using SMBv1
