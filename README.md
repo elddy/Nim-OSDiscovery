@@ -3,7 +3,7 @@ SMB-OS-Discovery implementation in Nim
 
 ## Install
 ```
-nimble install OSDiscovery
+nimble install https://github.com/elddy/Nim-OSDiscovery
 ```
 
 ## Usage
