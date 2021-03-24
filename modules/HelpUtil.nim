@@ -2,11 +2,21 @@
     HelpUtil
 ]#
 
-import tables, strutils, regex, sequtils, algorithm, net, terminal
+import tables, strutils, regex, sequtils, algorithm, net, terminal, os
 
 type
     STATUS* = enum
         Error, Success, Info
+
+proc checkSigning*(data: seq[string]): bool =
+    if data[70] == "03":
+        result = true 
+
+proc checkDialect*(data: seq[string]): string =
+    if data[4..7] == @["FF", "53", "4D", "42"]:
+        result = "SMB1"
+    else:
+        result = "SMB2"
 
 proc hexToNormalHexArray*(hex: string): seq[string] =
     var a = findAndCaptureAll(hex, re"..")
@@ -93,6 +103,34 @@ proc seqHexToNumber*(res: seq[string]): int =
     var temp = res
     temp.reverse
     result = temp.join("").parseHexInt()
+
+proc byteArrayToNumber*(res: openArray[byte]): int =
+    var temp: seq[byte]
+    for b in res:
+        temp.add(b)
+    reverse(temp)
+    return temp.byteArrayToString().parseHexInt()
+
+#[
+    Globals
+]#
+var 
+    session_ID*: seq[byte] = @[0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte,0x00.byte]
+    process_ID*: seq[byte] = pidToByteArray(getCurrentProcessId())
+    tree_ID*: seq[byte] = @[0x00.byte,0x00.byte,0x00.byte,0x00.byte]
+    signing*: bool
+    HMAC_SHA256_key*: seq[byte]
+
+#[
+    Parse Windows version from response
+]#
+proc parseWindowsVersion*(response: seq[string]): string =
+    var data = response.join("").parseHexStr().split('\0').join("")
+    result &= "Windows"
+    result &= data.split("Windows")[1]
+    result &= " (Windows"
+    result &= data.split("Windows")[2]
+    result &= ")"
 
 #[
     Prints nice and all

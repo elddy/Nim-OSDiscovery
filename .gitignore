@@ -1,3 +1,4 @@
+*.pcapng
 nimcache/
 nimblecache/
 htmldocs/

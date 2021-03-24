@@ -2,24 +2,8 @@
     SMBv1 Negotiate
 ]#
 
-import tables, os, strutils, regex, sequtils, algorithm
-
-proc hexToPSShellcode(hex: string): string =
-    var a = findAndCaptureAll(hex, re"..")
-    for b in 0..a.len - 1:
-        if a[b][0] == '0':
-            a[b] = substr(a[b], 1)
-    result = "0x" & a.join(",0x")
-  
-proc checkSigning*(data: seq[string]): bool =
-    if data[70] == "03":
-        result = true 
-
-proc checkDialect*(data: seq[string]): string =
-    if data[4..7] == @["FF", "53", "4D", "42"]:
-        result = "SMB1"
-    else:
-        result = "SMB2"
+import tables, os, strutils, sequtils, algorithm
+import HelpUtil, NTLM
 
 proc NewPacketSMBHeader(command, flags1, flags2, treeID, processID, userID: seq[byte]): OrderedTable[string, seq[byte]] =
     
@@ -76,11 +60,36 @@ proc NewPacketNetBIOSSessionService(headerLength, dataLength: int): OrderedTable
     NetBIOSSessionService.add("Length", length)
     return NetBIOSSessionService
 
+proc NewPacketSMBSessionSetupAndXRequest(SecurityBlob: seq[byte]): OrderedTable[string, seq[byte]] =
+    
+    let byte_count = getBytes(SecurityBlob.len)[..1] # [Byte[]]$byte_count = [System.BitConverter]::GetBytes($SecurityBlob.Length)[0,1]
+    let security_blob_length = getBytes(SecurityBlob.len+5)[..1] # [Byte[]]$security_blob_length = [System.BitConverter]::GetBytes($SecurityBlob.Length + 5)[0,1]
+
+    var SMBSessionSetupAndXRequest = initOrderedTable[string, seq[byte]]() # $SMBSessionSetupAndXRequest = New-Object System.Collections.Specialized.OrderedDictionary
+
+    SMBSessionSetupAndXRequest.add("WordCount", @[0x0c.byte]) # $SMBSessionSetupAndXRequest.Add("WordCount",[Byte[]](0x0c))
+    SMBSessionSetupAndXRequest.add("AndXCommand", @[0xff.byte]) # $SMBSessionSetupAndXRequest.Add("AndXCommand",[Byte[]](0xff))
+    SMBSessionSetupAndXRequest.add("Reserved", @[0x00.byte]) # $SMBSessionSetupAndXRequest.Add("Reserved",[Byte[]](0x00))
+    SMBSessionSetupAndXRequest.add("AndXOffset", @[0x00.byte, 0x00.byte]) # $SMBSessionSetupAndXRequest.Add("AndXOffset",[Byte[]](0x00,0x00))
+    SMBSessionSetupAndXRequest.add("MaxBuffer", @[0xff.byte, 0xff.byte]) # $SMBSessionSetupAndXRequest.Add("MaxBuffer",[Byte[]](0xff,0xff))
+    SMBSessionSetupAndXRequest.add("MaxMpxCount", @[0x02.byte, 0x00.byte]) # $SMBSessionSetupAndXRequest.Add("MaxMpxCount",[Byte[]](0x02,0x00))
+    SMBSessionSetupAndXRequest.add("VCNumber", @[0x01.byte, 0x00.byte]) # $SMBSessionSetupAndXRequest.Add("VCNumber",[Byte[]](0x01,0x00))
+    SMBSessionSetupAndXRequest.add("SessionKey", @[0x00.byte, 0x00.byte, 0x00.byte, 0x00.byte]) # $SMBSessionSetupAndXRequest.Add("SessionKey",[Byte[]](0x00,0x00,0x00,0x00))
+    SMBSessionSetupAndXRequest.add("SecurityBlobLength", byte_count) # $SMBSessionSetupAndXRequest.Add("SecurityBlobLength",$byte_count)
+    SMBSessionSetupAndXRequest.add("Reserved2", @[0x00.byte, 0x00.byte, 0x00.byte, 0x00.byte]) # $SMBSessionSetupAndXRequest.Add("Reserved2",[Byte[]](0x00,0x00,0x00,0x00))
+    SMBSessionSetupAndXRequest.add("Capabilities", @[0x44.byte, 0x00.byte, 0x00.byte, 0x80.byte]) # $SMBSessionSetupAndXRequest.Add("Capabilities",[Byte[]](0x44,0x00,0x00,0x80))
+    SMBSessionSetupAndXRequest.add("ByteCount", security_blob_length) # $SMBSessionSetupAndXRequest.Add("ByteCount",$security_blob_length)
+    SMBSessionSetupAndXRequest.add("SecurityBlob", SecurityBlob) # $SMBSessionSetupAndXRequest.Add("SecurityBlob",$SecurityBlob)
+    SMBSessionSetupAndXRequest.add("NativeOS", @[0x00.byte, 0x00.byte, 0x00.byte]) # $SMBSessionSetupAndXRequest.Add("NativeOS",[Byte[]](0x00,0x00,0x00))
+    SMBSessionSetupAndXRequest.add("NativeLANManage", @[0x00.byte, 0x00.byte]) # $SMBSessionSetupAndXRequest.Add("NativeLANManage",[Byte[]](0x00,0x00))
+
+    return SMBSessionSetupAndXRequest
+
 proc convertToByteArray(tab: OrderedTable): seq[byte] =
     for v in tab.values:
         result.add(v)
 
-proc getSMBv1NegoPacket*(): string =
+proc getSMBv1NegoPacket*(version: string): string =
     let process_ID = getCurrentProcessId().toHex().split("00").join()
     var reversing = (process_ID.hexToPSShellcode().split(","))
 
@@ -91,7 +100,7 @@ proc getSMBv1NegoPacket*(): string =
 
     let 
         smbHeader = convertToByteArray NewPacketSMBHeader(@[0x72.byte], @[0x18.byte], @[0x01.byte,0x48.byte], @[0xff.byte,0xff.byte], revBytes, @[0x00.byte,0x00.byte])
-        smbData = convertToByteArray NewPacketSMBNegotiateProtocolRequest("SMB2.1")
+        smbData = convertToByteArray NewPacketSMBNegotiateProtocolRequest(version)
         netBiosSession = convertToByteArray NewPacketNetBIOSSessionService(smbHeader.len(), smbData.len())
         fullPacket = concat(netBiosSession, smbHeader, smbData)
     
@@ -100,4 +109,23 @@ proc getSMBv1NegoPacket*(): string =
         strPacket &= p.toHex()
     return (strPacket).parseHexStr()
 
+proc getSMBv1NTLMNego*(signing: bool): string =
+    var negotiate_flags: seq[byte]
+    if signing:
+        negotiate_flags = @[0x15.byte,0x82.byte,0x08.byte,0xa0.byte] # Signing true
+    else:
+        negotiate_flags = @[0x05.byte,0x82.byte,0x08.byte,0xa0.byte] # Signing false
+
+    var packet_SMB_header = NewPacketSMBHeader(@[0x73.byte], @[0x18.byte], @[0x07.byte, 0xc8.byte], @[0xff.byte, 0xff.byte], process_ID, @[0x00.byte, 0x00.byte])
+    if signing:
+        packet_SMB_header["Flags2"] = @[0x05.byte,0x48.byte] # Signing true
+
+    let
+        smb1Header = convertToByteArray packet_SMB_header
+        NTLMSSPnegotiate = convertToByteArray NewPacketNTLMSSPNegotiate(negotiate_flags, @[])
+        smb1Data = convertToByteArray NewPacketSMBSessionSetupAndXRequest(NTLMSSPnegotiate)
+        netBiosSession = convertToByteArray NewPacketNetBIOSSessionService(smb1Header.len(), smb1Data.len())
+        fullPacket = concat(netBiosSession, smb1Header, smb1Data)
+    
+    return buildPacket(fullPacket)
 

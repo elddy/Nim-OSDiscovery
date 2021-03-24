@@ -1,8 +1,12 @@
 #[
     SMB OS Discovery
 ]#
-import modules/[SMBv1, SMBv2, HelpUtil, NTLM], net, strutils
+import net, strutils, terminal
+import modules/[SMBv1, SMBv2, HelpUtil, NTLM]
 
+#[
+    Object for the target information
+]#
 type
     TARGET_INFO* = object
         os_version*: string
@@ -11,7 +15,10 @@ type
         dns_domain*: string
         dns_computer*: string
 
-proc parseTargetInfo(target_info: seq[string]): TARGET_INFO =
+#[
+    Parse the target info response packet
+]#
+proc parseTargetInfo(target_info: seq[string], ntlmssp_struct: NTLMSSP_STRUCT): TARGET_INFO =
     ## NetBIOS Domain Name
     let 
         domain_len = target_info[2..3].seqHexToNumber()
@@ -36,18 +43,27 @@ proc parseTargetInfo(target_info: seq[string]): TARGET_INFO =
         dns_computer_offset = dns_domain_offset + 4 + dns_computer_len
     result.dns_computer = target_info[dns_domain_offset + 4..dns_computer_offset - 1].join("").parseHexStr()
 
-proc `$`(info: TARGET_INFO): string =
-    echo "OS"
+    ## OS version (SMBv1 get more accurate version later)
+    let 
+        major_version = ntlmssp_struct.major_version[0].int
+        minor_version = ntlmssp_struct.minor_version[0].int
+        build_number = ntlmssp_struct.build_number.byteArrayToNumber()
+    result.os_version = "$1.$2 (Build $3)" % [$major_version, $minor_version, $build_number]
 
 #[
-    Run OS discovery
-    Return object with the following information:
-        netBios_domain      -> NetBIOS domain name
-        netBios_computer    -> NetBIOS computer name
-        dns_domain          -> DNS domain name
-        dns_computer        -> DNS computer name
+    Print nice and all
 ]#
-proc runOSDiscovery*(target: string): TARGET_INFO =
+proc `$`*(info: TARGET_INFO) =
+    stdout.write("OS Version --> "); stdout.styledWrite(fgCyan, info.os_version); stdout.write("\n")
+    stdout.write("NetBIOS domain name --> "); stdout.styledWrite(fgCyan, info.netBios_domain); stdout.write("\n")
+    stdout.write("NetBIOS computer name --> "); stdout.styledWrite(fgCyan, info.netBios_computer); stdout.write("\n")
+    stdout.write("DNS domain name --> "); stdout.styledWrite(fgCyan, info.dns_domain); stdout.write("\n")
+    stdout.write("DNS computer name --> "); stdout.styledWrite(fgCyan, info.dns_computer); stdout.write("\n")
+
+#[
+    Discover OS version using SMBv1
+]#
+proc SMBv1Discovery(target: string, info: var TARGET_INFO) = 
     let socket = newSocket()
     var recvClient: seq[string]
 
@@ -55,7 +71,35 @@ proc runOSDiscovery*(target: string): TARGET_INFO =
     socket.connect(target, 445.Port)
 
     ## SMBv1 Init negotiate
-    socket.send(getSMBv1NegoPacket())
+    socket.send(getSMBv1NegoPacket("SMB1"))
+    recvClient = socket.recvPacket(1024, 100)
+
+    ## Check Signing
+    signing = checkSigning recvClient
+
+    ## SMBv1NTLM negotiate
+    socket.send(getSMBv1NTLMNego(signing))
+    recvClient = socket.recvPacket(1024, 100)
+    
+    ## Parse Windows version from the response
+    let win_ver = parseWindowsVersion(recvClient)
+
+    info.os_version = win_ver
+
+    socket.close()
+
+#[
+    Discover host information using SMBv2
+]#
+proc SMBv2Discovery(target: string, info: var TARGET_INFO) = 
+    let socket = newSocket()
+    var recvClient: seq[string]
+
+    ## Connect
+    socket.connect(target, 445.Port)
+
+    ## SMBv1 Init negotiate
+    socket.send(getSMBv1NegoPacket("SMB2.1"))
     recvClient = socket.recvPacket(1024, 100)
 
     ## Check Signing
@@ -87,8 +131,28 @@ proc runOSDiscovery*(target: string): TARGET_INFO =
         target_info_len = ntlmssp_struct.target_info_length[0].int
         target_info_byte = NTLMSSP[NTLMSSP.len-target_info_len..endNTLMSSP]
 
-    return parseTargetInfo(target_info_byte)
+    info = parseTargetInfo(target_info_byte, ntlmssp_struct)
+
+#[
+    Run OS discovery (SMBv2, SMBv1)
+    Return object with the following information:
+        os_version          -> OS Version
+        netBios_domain      -> NetBIOS domain name
+        netBios_computer    -> NetBIOS computer name
+        dns_domain          -> DNS domain name
+        dns_computer        -> DNS computer name
+]#
+proc runOSDiscovery*(target: string): TARGET_INFO =
+    var info: TARGET_INFO
+
+    ## SMBv2
+    SMBv2Discovery(target, info)
+    
+    ## SMBv1
+    SMBv1Discovery(target, info)
+
+    return info
 
 when isMainModule:
-    let target_info = runOSDiscovery("10.0.0.22")
-    echo target_info.dns_computer
+    let targetInfo = runOSDiscovery("10.0.0.41")
+    $targetInfo
